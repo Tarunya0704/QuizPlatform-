@@ -3,22 +3,25 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, CheckCircle, Timer, Trophy } from 'lucide-react';
+import type { Question, Attempt } from '@/types';
 
-// IndexedDB setup
-const initializeDB = () => {
+// IndexedDB setup with TypeScript
+const initializeDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('QuizDB', 1);
+    const request: IDBOpenDBRequest = indexedDB.open('QuizDB', 1);
 
     request.onerror = () => {
       reject('Error opening database');
     };
 
-    request.onsuccess = () => {
-      resolve(request.result);
+    request.onsuccess = (event: Event) => {
+      const target = event.target as IDBOpenDBRequest;
+      resolve(target.result);
     };
 
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
+    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+      const target = event.target as IDBOpenDBRequest;
+      const db = target.result;
       if (!db.objectStoreNames.contains('attempts')) {
         db.createObjectStore('attempts', { keyPath: 'id', autoIncrement: true });
       }
@@ -26,8 +29,8 @@ const initializeDB = () => {
   });
 };
 
-// Sample questions - replace with your actual questions
-const sampleQuestions = [
+// Sample questions
+const sampleQuestions: Question[] = [
   {
     id: 1,
     question: "What is the capital of France?",
@@ -48,24 +51,25 @@ const sampleQuestions = [
   }
 ];
 
-const QuizPlatform = () => {
-  const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [score, setScore] = useState(0);
-  const [showScore, setShowScore] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(30);
-  const [attempts, setAttempts] = useState([]);
-  const [selectedAnswer, setSelectedAnswer] = useState(null);
-  const [showFeedback, setShowFeedback] = useState(false);
-  const [db, setDB] = useState(null);
+const QuizPlatform: React.FC = () => {
+  const [currentQuestion, setCurrentQuestion] = useState<number>(0);
+  const [score, setScore] = useState<number>(0);
+  const [showScore, setShowScore] = useState<boolean>(false);
+  const [timeLeft, setTimeLeft] = useState<number>(30);
+  const [attempts, setAttempts] = useState<Attempt[]>([]);
+  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
+  const [showFeedback, setShowFeedback] = useState<boolean>(false);
+  const [db, setDB] = useState<IDBDatabase | null>(null);
 
   // Load attempts from IndexedDB
-  const loadAttempts = useCallback(async (database) => {
+  const loadAttempts = useCallback(async (database: IDBDatabase) => {
     const transaction = database.transaction(['attempts'], 'readonly');
     const store = transaction.objectStore('attempts');
     const request = store.getAll();
 
-    request.onsuccess = () => {
-      setAttempts(request.result);
+    request.onsuccess = (event: Event) => {
+      const target = event.target as IDBRequest;
+      setAttempts(target.result as Attempt[]);
     };
   }, []);
 
@@ -75,7 +79,7 @@ const QuizPlatform = () => {
       try {
         const database = await initializeDB();
         setDB(database);
-        loadAttempts(database);
+        await loadAttempts(database);
       } catch (error) {
         console.error('Failed to initialize database:', error);
       }
@@ -84,7 +88,7 @@ const QuizPlatform = () => {
   }, [loadAttempts]);
 
   // Save attempt to IndexedDB
-  const saveAttempt = useCallback(async (attempt) => {
+  const saveAttempt = useCallback(async (attempt: Omit<Attempt, 'id'>) => {
     if (!db) return;
 
     const transaction = db.transaction(['attempts'], 'readwrite');
@@ -110,7 +114,7 @@ const QuizPlatform = () => {
     } else {
       const newAttempt = {
         date: new Date().toLocaleString(),
-        score: score,
+        score,
         totalQuestions: sampleQuestions.length,
         percentage: ((score / sampleQuestions.length) * 100).toFixed(1),
         timestamp: Date.now()
@@ -123,7 +127,7 @@ const QuizPlatform = () => {
   useEffect(() => {
     if (timeLeft > 0 && !showScore) {
       const timer = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
+        setTimeLeft(prev => prev - 1);
       }, 1000);
 
       return () => clearInterval(timer);
@@ -132,7 +136,7 @@ const QuizPlatform = () => {
     }
   }, [timeLeft, showScore, handleNextQuestion]);
 
-  const handleAnswerSelect = useCallback((answer) => {
+  const handleAnswerSelect = useCallback((answer: string) => {
     setSelectedAnswer(answer);
     setShowFeedback(true);
     
