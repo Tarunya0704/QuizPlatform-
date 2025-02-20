@@ -1,10 +1,30 @@
 "use client"
-
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, CheckCircle, Timer, Trophy } from 'lucide-react';
+
+// IndexedDB setup
+const initializeDB = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('QuizDB', 1);
+
+    request.onerror = () => {
+      reject('Error opening database');
+    };
+
+    request.onsuccess = () => {
+      resolve(request.result);
+    };
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('attempts')) {
+        db.createObjectStore('attempts', { keyPath: 'id', autoIncrement: true });
+      }
+    };
+  });
+};
 
 // Sample questions - replace with your actual questions
 const sampleQuestions = [
@@ -36,6 +56,49 @@ const QuizPlatform = () => {
   const [attempts, setAttempts] = useState([]);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [db, setDB] = useState(null);
+
+  // Initialize IndexedDB
+  useEffect(() => {
+    const setupDB = async () => {
+      try {
+        const database = await initializeDB();
+        setDB(database);
+        loadAttempts(database);
+      } catch (error) {
+        console.error('Failed to initialize database:', error);
+      }
+    };
+    setupDB();
+  }, []);
+
+  // Load attempts from IndexedDB
+  const loadAttempts = async (database) => {
+    const transaction = database.transaction(['attempts'], 'readonly');
+    const store = transaction.objectStore('attempts');
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+      setAttempts(request.result);
+    };
+  };
+
+  // Save attempt to IndexedDB
+  const saveAttempt = async (attempt) => {
+    if (!db) return;
+
+    const transaction = db.transaction(['attempts'], 'readwrite');
+    const store = transaction.objectStore('attempts');
+    const request = store.add(attempt);
+
+    request.onsuccess = () => {
+      loadAttempts(db);
+    };
+
+    request.onerror = () => {
+      console.error('Error saving attempt');
+    };
+  };
 
   useEffect(() => {
     if (timeLeft > 0 && !showScore) {
@@ -73,9 +136,11 @@ const QuizPlatform = () => {
       const newAttempt = {
         date: new Date().toLocaleString(),
         score: score,
-        totalQuestions: sampleQuestions.length
+        totalQuestions: sampleQuestions.length,
+        percentage: ((score / sampleQuestions.length) * 100).toFixed(1),
+        timestamp: Date.now()
       };
-      setAttempts([...attempts, newAttempt]);
+      saveAttempt(newAttempt);
       setShowScore(true);
     }
   };
@@ -87,6 +152,18 @@ const QuizPlatform = () => {
     setTimeLeft(30);
     setSelectedAnswer(null);
     setShowFeedback(false);
+  };
+
+  const clearHistory = async () => {
+    if (!db) return;
+
+    const transaction = db.transaction(['attempts'], 'readwrite');
+    const store = transaction.objectStore('attempts');
+    const request = store.clear();
+
+    request.onsuccess = () => {
+      setAttempts([]);
+    };
   };
 
   return (
@@ -151,12 +228,22 @@ const QuizPlatform = () => {
               </div>
               
               <div className="mt-6">
-                <h3 className="text-xl font-semibold mb-3">Attempt History</h3>
-                <div className="space-y-2">
-                  {attempts.map((attempt, index) => (
-                    <div key={index} className="p-3 bg-gray-100 rounded-lg">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-xl font-semibold">Attempt History</h3>
+                  <Button 
+                    variant="destructive" 
+                    size="sm"
+                    onClick={clearHistory}
+                    className="text-sm"
+                  >
+                    Clear History
+                  </Button>
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {attempts.sort((a, b) => b.timestamp - a.timestamp).map((attempt, index) => (
+                    <div key={attempt.id} className="p-3 bg-gray-100 rounded-lg">
                       <p>Date: {attempt.date}</p>
-                      <p>Score: {attempt.score}/{attempt.totalQuestions}</p>
+                      <p>Score: {attempt.score}/{attempt.totalQuestions} ({attempt.percentage}%)</p>
                     </div>
                   ))}
                 </div>
