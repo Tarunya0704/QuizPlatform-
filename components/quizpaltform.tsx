@@ -1,5 +1,5 @@
 "use client"
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, CheckCircle, Timer, Trophy } from 'lucide-react';
@@ -58,6 +58,17 @@ const QuizPlatform = () => {
   const [showFeedback, setShowFeedback] = useState(false);
   const [db, setDB] = useState(null);
 
+  // Load attempts from IndexedDB
+  const loadAttempts = useCallback(async (database) => {
+    const transaction = database.transaction(['attempts'], 'readonly');
+    const store = transaction.objectStore('attempts');
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+      setAttempts(request.result);
+    };
+  }, []);
+
   // Initialize IndexedDB
   useEffect(() => {
     const setupDB = async () => {
@@ -70,21 +81,10 @@ const QuizPlatform = () => {
       }
     };
     setupDB();
-  }, []);
-
-  // Load attempts from IndexedDB
-  const loadAttempts = async (database) => {
-    const transaction = database.transaction(['attempts'], 'readonly');
-    const store = transaction.objectStore('attempts');
-    const request = store.getAll();
-
-    request.onsuccess = () => {
-      setAttempts(request.result);
-    };
-  };
+  }, [loadAttempts]);
 
   // Save attempt to IndexedDB
-  const saveAttempt = async (attempt) => {
+  const saveAttempt = useCallback(async (attempt) => {
     if (!db) return;
 
     const transaction = db.transaction(['attempts'], 'readwrite');
@@ -98,39 +98,14 @@ const QuizPlatform = () => {
     request.onerror = () => {
       console.error('Error saving attempt');
     };
-  };
+  }, [db, loadAttempts]);
 
-  useEffect(() => {
-    if (timeLeft > 0 && !showScore) {
-      const timer = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
-      }, 1000);
-
-      return () => clearInterval(timer);
-    } else if (timeLeft === 0 && !showScore) {
-      handleNextQuestion();
-    }
-  }, [timeLeft, showScore]);
-
-  const handleAnswerSelect = (answer) => {
-    setSelectedAnswer(answer);
-    setShowFeedback(true);
-    
-    if (answer === sampleQuestions[currentQuestion].correctAnswer) {
-      setScore(score + 1);
-    }
-
-    setTimeout(() => {
-      handleNextQuestion();
-    }, 1500);
-  };
-
-  const handleNextQuestion = () => {
+  const handleNextQuestion = useCallback(() => {
     setShowFeedback(false);
     setSelectedAnswer(null);
     
     if (currentQuestion + 1 < sampleQuestions.length) {
-      setCurrentQuestion(currentQuestion + 1);
+      setCurrentQuestion(prev => prev + 1);
       setTimeLeft(30);
     } else {
       const newAttempt = {
@@ -143,18 +118,43 @@ const QuizPlatform = () => {
       saveAttempt(newAttempt);
       setShowScore(true);
     }
-  };
+  }, [currentQuestion, score, saveAttempt]);
 
-  const restartQuiz = () => {
+  useEffect(() => {
+    if (timeLeft > 0 && !showScore) {
+      const timer = setInterval(() => {
+        setTimeLeft((prev) => prev - 1);
+      }, 1000);
+
+      return () => clearInterval(timer);
+    } else if (timeLeft === 0 && !showScore) {
+      handleNextQuestion();
+    }
+  }, [timeLeft, showScore, handleNextQuestion]);
+
+  const handleAnswerSelect = useCallback((answer) => {
+    setSelectedAnswer(answer);
+    setShowFeedback(true);
+    
+    if (answer === sampleQuestions[currentQuestion].correctAnswer) {
+      setScore(prev => prev + 1);
+    }
+
+    setTimeout(() => {
+      handleNextQuestion();
+    }, 1500);
+  }, [currentQuestion, handleNextQuestion]);
+
+  const restartQuiz = useCallback(() => {
     setCurrentQuestion(0);
     setScore(0);
     setShowScore(false);
     setTimeLeft(30);
     setSelectedAnswer(null);
     setShowFeedback(false);
-  };
+  }, []);
 
-  const clearHistory = async () => {
+  const clearHistory = useCallback(async () => {
     if (!db) return;
 
     const transaction = db.transaction(['attempts'], 'readwrite');
@@ -164,7 +164,7 @@ const QuizPlatform = () => {
     request.onsuccess = () => {
       setAttempts([]);
     };
-  };
+  }, [db]);
 
   return (
     <div className="max-w-2xl mx-auto p-4">
@@ -188,9 +188,9 @@ const QuizPlatform = () => {
                 {sampleQuestions[currentQuestion].question}
               </div>
               <div className="grid gap-3">
-                {sampleQuestions[currentQuestion].options.map((option, index) => (
+                {sampleQuestions[currentQuestion].options.map((option) => (
                   <Button
-                    key={index}
+                    key={option}
                     onClick={() => handleAnswerSelect(option)}
                     className={`justify-start text-left ${
                       showFeedback
@@ -240,12 +240,14 @@ const QuizPlatform = () => {
                   </Button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {attempts.sort((a, b) => b.timestamp - a.timestamp).map((attempt, index) => (
-                    <div key={attempt.id} className="p-3 bg-gray-100 rounded-lg">
-                      <p>Date: {attempt.date}</p>
-                      <p>Score: {attempt.score}/{attempt.totalQuestions} ({attempt.percentage}%)</p>
-                    </div>
-                  ))}
+                  {attempts
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .map((attempt) => (
+                      <div key={attempt.id} className="p-3 bg-gray-100 rounded-lg">
+                        <p>Date: {attempt.date}</p>
+                        <p>Score: {attempt.score}/{attempt.totalQuestions} ({attempt.percentage}%)</p>
+                      </div>
+                    ))}
                 </div>
               </div>
               
